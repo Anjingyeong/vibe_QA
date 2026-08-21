@@ -3,6 +3,9 @@ name: Container CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - README.md
+      - docs/**
   workflow_dispatch:
 
 permissions:
@@ -11,7 +14,7 @@ permissions:
 
 concurrency:
   group: vibecheck-container-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/anjingyeong/vibecheck

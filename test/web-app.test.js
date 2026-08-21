@@ -32,6 +32,8 @@ test("web app queues a scan, exposes progress, and serves completed result", asy
   assert.equal(home.status, 200);
   const homeHtml = await home.text();
   assert.match(homeHtml, /검사 시작/);
+  assert.match(homeHtml, /https:\/\/는 생략해도 됩니다/);
+  assert.match(homeHtml, /aria-label=\"검사할 공개 웹사이트 주소\"/);
   const inlineScripts = [...homeHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   assert.ok(inlineScripts.length > 0);
   for (const source of inlineScripts) assert.doesNotThrow(() => new Script(source));
@@ -60,6 +62,26 @@ test("web app queues a scan, exposes progress, and serves completed result", asy
   const result = await fetch(`${base}/results/${job.id}`);
   assert.equal(result.status, 200);
   assert.match(await result.text(), /Evidence result/);
+});
+
+test("failed scan page keeps technical errors collapsed behind friendly recovery UX", async (t) => {
+  const app = createVibeCheckServer({ async runScan() { throw new Error("browserType.launch: internal stack detail"); } });
+  const address = await app.listen();
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${address.port}`;
+  const created = await fetch(`${base}/api/scans`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "example.com" }) });
+  const job = await created.json();
+  let state;
+  for (let index = 0; index < 20; index += 1) {
+    state = await (await fetch(`${base}/api/scans/${job.id}`)).json();
+    if (state.status === "failed") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const page = await (await fetch(`${base}/results/${job.id}`)).text();
+  assert.match(page, /기술 정보 보기/);
+  assert.match(page, /다른 사이트 검사/);
+  assert.match(page, /잠시 후 다시 시도해 주세요/);
+  assert.doesNotMatch(page, />browserType\.launch: internal stack detail</);
 });
 
 test("web app rejects unsafe target input before scheduling", async (t) => {
