@@ -4,6 +4,10 @@ export function defaultBrowserChannel(platform = process.platform) {
   return null;
 }
 
+export function defaultBrowserEngine(platform = process.platform, arch = process.arch) {
+  return platform === "linux" && arch === "arm64" ? "firefox" : "chromium";
+}
+
 export function chromiumLaunchOptions({ browserChannel = defaultBrowserChannel(), headless = true } = {}) {
   return browserChannel ? { channel: browserChannel, headless } : { headless };
 }

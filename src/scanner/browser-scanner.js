@@ -1,8 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromium, firefox } from "playwright";
 import { installPublicAuthorization } from "../explorer/site-explorer.js";
-import { chromiumLaunchOptions, defaultBrowserChannel } from "../runtime/browser-runtime.js";
+import { chromiumLaunchOptions, defaultBrowserChannel, defaultBrowserEngine } from "../runtime/browser-runtime.js";
 
 const PROFILES = [
   { name: "desktop", viewport: { width: 1280, height: 720 } },
@@ -49,6 +49,7 @@ export function classifyConsoleMessage(text) {
 export async function scanBrowser(baseUrl, {
   screenshotDir,
   browserChannel = defaultBrowserChannel(),
+  browserEngine = defaultBrowserEngine(),
   targetPolicy = null,
   lookup,
   captureScreenshots = shouldCaptureScreenshots(),
@@ -56,16 +57,19 @@ export async function scanBrowser(baseUrl, {
   if (!screenshotDir) throw new Error("screenshotDir is required for evidence-backed browser QA");
   await mkdir(screenshotDir, { recursive: true });
 
-  const browser = await chromium.launch(chromiumLaunchOptions({ browserChannel }));
+  const browserType = browserEngine === "firefox" ? firefox : chromium;
+  const launchOptions = browserEngine === "chromium"
+    ? chromiumLaunchOptions({ browserChannel })
+    : { headless: true };
+  const browser = await browserType.launch(launchOptions);
   const findings = [];
   const profileResults = [];
 
   try {
     for (const profile of PROFILES) {
-      const context = await browser.newContext({
-        viewport: profile.viewport,
-        isMobile: Boolean(profile.isMobile),
-      });
+      const contextOptions = { viewport: profile.viewport };
+      if (browserEngine === "chromium") contextOptions.isMobile = Boolean(profile.isMobile);
+      const context = await browser.newContext(contextOptions);
       if (targetPolicy) {
         await installPublicAuthorization(context, targetPolicy, { ...(lookup ? { lookup } : {}) });
       }
@@ -199,6 +203,7 @@ export async function scanBrowser(baseUrl, {
   return {
     startedAt: new Date().toISOString(),
     baseUrl,
+    browserEngine,
     findings,
     profiles: profileResults,
   };

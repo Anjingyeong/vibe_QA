@@ -19,12 +19,12 @@ cp -a package.json package-lock.json src "$NEXT_DIR/"
 
 cd "$NEXT_DIR"
 npm ci
-PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" npx playwright install chromium firefox
 
 LIB_PATH=""
 if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
   echo 'playwright_system_deps=installing'
-  sudo -n env PATH="$PATH" npx playwright install-deps chromium
+  sudo -n env PATH="$PATH" npx playwright install-deps chromium firefox
   echo 'playwright_system_deps=installed'
 else
   echo 'playwright_system_deps=fallback_user_space'
@@ -64,7 +64,7 @@ else
   LIB_PATH="$(find "$LIB_ROOT" -type f -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: -)"
 fi
 
-BROWSER_BIN="$(PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module -e "import { chromium } from 'playwright'; console.log(chromium.executablePath())")"
+BROWSER_BIN="$(PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module -e "import { firefox } from 'playwright'; console.log(firefox.executablePath())")"
 
 missing="$(LD_LIBRARY_PATH="$LIB_PATH" ldd "$BROWSER_BIN" 2>/dev/null | awk '/not found/ {print $1}' | sort -u | paste -sd, -)"
 if [ -n "$missing" ]; then
@@ -74,8 +74,8 @@ fi
 
 echo 'browser_missing_libraries=0'
 LD_LIBRARY_PATH="$LIB_PATH" PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module <<'NODE'
-import { chromium } from 'playwright';
-const browser = await chromium.launch({ channel: 'chromium', headless: true });
+import { firefox } from 'playwright';
+const browser = await firefox.launch({ headless: true });
 const page = await browser.newPage();
 await page.setContent('<!doctype html><meta charset="utf-8"><title>VibeCheck runtime smoke</title><p>VibeCheck 한글 렌더링 ✓</p>');
 if ((await page.title()) !== 'VibeCheck runtime smoke') process.exitCode = 1;
