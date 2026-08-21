@@ -1,0 +1,28 @@
+name: Publish Cloudflare Replica
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - deploy/start-cloudflare-replica.sh
+      - deploy/verify-public.sh
+      - .github/workflows/publish-cloudflare.yml
+
+jobs:
+  publish-cloudflare:
+    runs-on: [self-hosted, Linux, ARM64, oci]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Start Cloudflare replica
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/start-cloudflare-replica.sh
+
+      - name: Verify public hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/verify-public.sh
