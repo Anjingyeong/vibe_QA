@@ -112,3 +112,9 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "aarch64"
           bash deploy/deploy-user-runtime.sh
+
+      - name: Configure Cloudflare public hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/configure-cloudflare.sh
