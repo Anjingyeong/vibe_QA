@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createVibeCheckServer, validateCustomerTarget } from "../src/web/app.js";
 
-test("customer target validation accepts only simple HTTPS targets", () => {
+test("customer target validation defaults bare domains to HTTPS and rejects unsafe schemes", () => {
   assert.equal(validateCustomerTarget("https://example.com"), "https://example.com/");
+  assert.equal(validateCustomerTarget("example.com"), "https://example.com/");
   assert.throws(() => validateCustomerTarget("http://example.com"), /Only HTTPS/);
   assert.throws(() => validateCustomerTarget("https://user:pass@example.com"), /credentials/);
   assert.throws(() => validateCustomerTarget("https://example.com:8443"), /Custom ports/);
