@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/vibecheck
+  IMAGE: ghcr.io/anjingyeong/vibecheck
 
 jobs:
   test:
@@ -26,6 +26,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
       - run: npm test
       - run: npm run benchmark
 
