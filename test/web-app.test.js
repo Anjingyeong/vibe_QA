@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Script } from "node:vm";
 import { createVibeCheckServer, validateCustomerTarget } from "../src/web/app.js";
 
 test("customer target validation defaults bare domains to HTTPS and rejects unsafe schemes", () => {
@@ -29,7 +30,11 @@ test("web app queues a scan, exposes progress, and serves completed result", asy
 
   const home = await fetch(`${base}/`);
   assert.equal(home.status, 200);
-  assert.match(await home.text(), /검사 시작/);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /검사 시작/);
+  const inlineScripts = [...homeHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+  assert.ok(inlineScripts.length > 0);
+  for (const source of inlineScripts) assert.doesNotThrow(() => new Script(source));
 
   const created = await fetch(`${base}/api/scans`, {
     method: "POST",

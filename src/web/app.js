@@ -101,7 +101,7 @@ function landingPage() {
     <section class="hero"><p class="muted">EVIDENCE-FIRST LAUNCH QA</p><h1>배포 전에,<br>망가진 곳부터 찾습니다.</h1><p class="muted">공개 웹사이트 URL을 입력하면 실제 브라우저로 데스크톱·모바일·네트워크·콘솔을 반복 검증합니다.</p></section>
     <section class="panel"><form id="scan" class="scan-form"><input id="url" name="url" type="text" required inputmode="url" autocomplete="url" placeholder="example.com"><button id="submit" class="btn" type="submit">검사 시작</button></form><p id="error" class="error"></p></section>`, `
     const form=document.getElementById('scan'),input=document.getElementById('url'),button=document.getElementById('submit'),error=document.getElementById('error');
-    form.addEventListener('submit',async(e)=>{e.preventDefault();error.textContent='';button.disabled=true;button.textContent='준비 중…';try{const raw=input.value.trim();const url=/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)?raw:'https://'+raw;input.value=url;const r=await fetch('/api/scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url})});const data=await r.json();if(!r.ok)throw new Error(data.error||'검사를 시작하지 못했습니다.');location.href='/results/'+data.id;}catch(err){error.textContent=err.message;button.disabled=false;button.textContent='검사 시작';}});`);
+    form.addEventListener('submit',async(e)=>{e.preventDefault();error.textContent='';button.disabled=true;button.textContent='준비 중…';try{const r=await fetch('/api/scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:input.value.trim()})});const data=await r.json();if(!r.ok)throw new Error(data.error||'검사를 시작하지 못했습니다.');location.href='/results/'+data.id;}catch(err){error.textContent=err.message;button.disabled=false;button.textContent='검사 시작';}});`);
 }
 
 function pendingPage(job) {
