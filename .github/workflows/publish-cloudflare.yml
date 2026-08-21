@@ -15,6 +15,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Reload systemd Cloudflare replica
+        shell: bash
+        run: |
+          set -euo pipefail
+          service=jk-cloudflared.service
+          old_pid="$(systemctl show "$service" -p MainPID --value)"
+          restart="$(systemctl show "$service" -p Restart --value)"
+          service_user="$(systemctl show "$service" -p User --value)"
+          test "$restart" = "always"
+          test "$service_user" = "$(id -un)"
+          test "$old_pid" -gt 1
+          kill -TERM "$old_pid"
+          for _ in {1..30}; do
+            new_pid="$(systemctl show "$service" -p MainPID --value 2>/dev/null || true)"
+            state="$(systemctl show "$service" -p ActiveState --value 2>/dev/null || true)"
+            if [ "$state" = "active" ] && [ -n "$new_pid" ] && [ "$new_pid" != "0" ] && [ "$new_pid" != "$old_pid" ] && kill -0 "$new_pid" 2>/dev/null; then
+              echo "systemd_cloudflared_reloaded=$new_pid"
+              break
+            fi
+            sleep 1
+          done
+          new_pid="$(systemctl show "$service" -p MainPID --value 2>/dev/null || true)"
+          test -n "$new_pid"
+          test "$new_pid" != "0"
+          test "$new_pid" != "$old_pid"
+          kill -0 "$new_pid"
+
       - name: Start Cloudflare replica
         shell: bash
         run: |
