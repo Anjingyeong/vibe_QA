@@ -113,8 +113,13 @@ jobs:
           test "$(uname -m)" = "aarch64"
           bash deploy/deploy-user-runtime.sh
 
-      - name: Configure Cloudflare public hostname
+  verify-oci-runtime:
+    needs: deploy-oci
+    runs-on: [self-hosted, Linux, ARM64, oci]
+    steps:
+      - name: Verify deployed service survives runner cleanup
         shell: bash
         run: |
           set -euo pipefail
-          bash deploy/configure-cloudflare.sh
+          curl -fsS http://127.0.0.1:8787/healthz >/dev/null
+          echo "oci_runtime_health=200"
