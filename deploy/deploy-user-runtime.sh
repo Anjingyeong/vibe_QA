@@ -22,7 +22,7 @@ npm ci
 PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" npx playwright install chromium
 
 seed_packages=(
-  libatk1.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1
+  libatk1.0-0t64 libatk-bridge2.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1
   libasound2t64 libatspi2.0-0t64 libavahi-common3 libavahi-client3 libfontconfig1
   libxrender1 libxcb-render0 libxcb-shm0 libpixman-1-0 libthai0 libharfbuzz0b libxi6
   libcairo2 libpango-1.0-0 libglib2.0-0t64 libnss3 libnspr4 libcups2t64 libdbus-1-3

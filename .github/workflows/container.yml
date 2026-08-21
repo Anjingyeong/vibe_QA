@@ -95,7 +95,7 @@ jobs:
           sbom: true
 
   deploy-oci:
-    needs: arm64-image
+    needs: test
     runs-on: [self-hosted, Linux, ARM64, oci]
     permissions:
       contents: read
