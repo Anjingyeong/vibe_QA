@@ -13,7 +13,7 @@ LOG_FILE="$RUNTIME_ROOT/cloudflared-vibecheck.log"
 "$CLOUDFLARED" --config "$CONFIG" tunnel ingress validate >/dev/null
 echo "ingress_validate=ok"
 
-credentials_file="$(sed -nE 's/^[[:space:]]*credentials-file:[[:space:]]*["'"']?([^"'"']+)["'"']?[[:space:]]*$/\1/p' "$CONFIG" | head -n1)"
+credentials_file="$(sed -n 's/^[[:space:]]*credentials-file:[[:space:]]*//p' "$CONFIG" | head -n1 | tr -d '"' | xargs)"
 [ -n "$credentials_file" ] || { echo "credentials_file=missing"; exit 1; }
 [ -r "$credentials_file" ] || { echo "credentials_file=unreadable"; exit 1; }
 echo "credentials_file=readable"
