@@ -17,6 +17,14 @@ function screenshotEvidence(filePath) {
   return { type: "screenshot", detail: `Full-page screenshot: ${filePath}` };
 }
 
+export function shouldCaptureScreenshots({ platform = process.platform, arch = process.arch } = {}) {
+  return !(platform === "linux" && arch === "arm64");
+}
+
+function evidenceWithShot(primary, shot) {
+  return shot ? [...primary, shot] : primary;
+}
+
 export function classifyConsoleMessage(text) {
   if (
     /content security policy/i.test(text) &&
@@ -43,6 +51,7 @@ export async function scanBrowser(baseUrl, {
   browserChannel = defaultBrowserChannel(),
   targetPolicy = null,
   lookup,
+  captureScreenshots = shouldCaptureScreenshots(),
 } = {}) {
   if (!screenshotDir) throw new Error("screenshotDir is required for evidence-backed browser QA");
   await mkdir(screenshotDir, { recursive: true });
@@ -95,9 +104,13 @@ export async function scanBrowser(baseUrl, {
         scrollWidth: document.documentElement.scrollWidth,
         visualWidth: window.visualViewport?.width ?? null,
       }));
-      const screenshotPath = path.join(screenshotDir, `${profile.name}.png`);
-      await page.screenshot({ path: screenshotPath, fullPage: true });
-      const shot = screenshotEvidence(screenshotPath);
+      let screenshotPath = null;
+      let shot = null;
+      if (captureScreenshots) {
+        screenshotPath = path.join(screenshotDir, `${profile.name}.png`);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        shot = screenshotEvidence(screenshotPath);
+      }
 
       if (consoleErrors.length > 0) {
         const groups = new Map();
@@ -119,10 +132,9 @@ export async function scanBrowser(baseUrl, {
             reproduction: `Open ${baseUrl} in a ${profile.viewport.width}x${profile.viewport.height} browser viewport and inspect console errors.`,
             expected: classification.expected,
             actual: `${messages.length} matching console error(s) observed; first: ${messages[0]}`,
-            evidence: [
+            evidence: evidenceWithShot([
               { type: "console", detail: messages.join(" | ") },
-              shot,
-            ],
+            ], shot),
           }));
         }
       }
@@ -135,10 +147,9 @@ export async function scanBrowser(baseUrl, {
           reproduction: `Open ${baseUrl} in a ${profile.viewport.width}x${profile.viewport.height} browser viewport and observe uncaught page errors.`,
           expected: "The launch page should not throw uncaught runtime errors.",
           actual: `${pageErrors.length} uncaught error(s) observed; first: ${pageErrors[0]}`,
-          evidence: [
+          evidence: evidenceWithShot([
             { type: "console", detail: pageErrors.join(" | ") },
-            shot,
-          ],
+          ], shot),
         }));
       }
 
@@ -150,10 +161,9 @@ export async function scanBrowser(baseUrl, {
           reproduction: `Open ${baseUrl} in the ${profile.name} profile and inspect the network response for ${bad.pathname}.`,
           expected: "Resources required by the rendered launch page should resolve without 4xx/5xx responses.",
           actual: `${bad.pathname} returned HTTP ${bad.status} as ${bad.resourceType}.`,
-          evidence: [
+          evidence: evidenceWithShot([
             { type: "network", detail: `${bad.resourceType} GET ${bad.pathname} -> ${bad.status}` },
-            shot,
-          ],
+          ], shot),
         }));
       }
 
@@ -165,10 +175,9 @@ export async function scanBrowser(baseUrl, {
           reproduction: `Open ${baseUrl} at ${profile.viewport.width}px width and compare document scroll width to viewport width.`,
           expected: "The page should fit within the viewport without unintended horizontal scrolling.",
           actual: `Document width is ${layout.scrollWidth}px for a ${layout.clientWidth}px client viewport.`,
-          evidence: [
+          evidence: evidenceWithShot([
             { type: "assertion", detail: `scrollWidth=${layout.scrollWidth}, clientWidth=${layout.clientWidth}, innerWidth=${layout.innerWidth}, visualWidth=${layout.visualWidth}` },
-            shot,
-          ],
+          ], shot),
         }));
       }
 
