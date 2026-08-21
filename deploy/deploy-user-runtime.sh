@@ -22,6 +22,7 @@ npm ci
 PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" npx playwright install chromium firefox
 
 LIB_PATH=""
+SKIP_HOST_VALIDATE=""
 if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
   echo 'playwright_system_deps=installing'
   sudo -n env PATH="$PATH" npx playwright install-deps chromium firefox
@@ -34,6 +35,7 @@ else
     libxrender1 libxcb-render0 libxcb-shm0 libpixman-1-0 libthai0 libharfbuzz0b libxi6
     libcairo2 libpango-1.0-0 libglib2.0-0t64 libnss3 libnspr4 libcups2t64 libdbus-1-3
     libdrm2 libx11-6 libxcb1 libxext6 libxkbcommon0
+    libxcursor1 libgtk-3-0t64 libpangocairo-1.0-0 libcairo-gobject2 libgdk-pixbuf-2.0-0
   )
 
   rm -rf "$DEB_DIR" "$LIB_ROOT"
@@ -62,6 +64,7 @@ else
   shopt -u nullglob
 
   LIB_PATH="$(find "$LIB_ROOT" -type f -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: -)"
+  SKIP_HOST_VALIDATE="1"
 fi
 
 BROWSER_BIN="$(PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module -e "import { firefox } from 'playwright'; console.log(firefox.executablePath())")"
@@ -73,7 +76,7 @@ if [ -n "$missing" ]; then
 fi
 
 echo 'browser_missing_libraries=0'
-LD_LIBRARY_PATH="$LIB_PATH" PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module <<'NODE'
+PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="$SKIP_HOST_VALIDATE" LD_LIBRARY_PATH="$LIB_PATH" PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module <<'NODE'
 import { firefox } from 'playwright';
 const browser = await firefox.launch({ headless: true });
 const page = await browser.newPage();
@@ -104,6 +107,7 @@ mv "$NEXT_DIR" "$APP_DIR"
 cd "$APP_DIR"
 : > "$LOG_FILE"
 env -u RUNNER_TRACKING_ID \
+  PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="$SKIP_HOST_VALIDATE" \
   LD_LIBRARY_PATH="$LIB_PATH" \
   PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" \
   NODE_ENV=production \
