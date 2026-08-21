@@ -21,40 +21,49 @@ cd "$NEXT_DIR"
 npm ci
 PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" npx playwright install chromium
 
-seed_packages=(
-  libatk1.0-0t64 libatk-bridge2.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1
-  libasound2t64 libatspi2.0-0t64 libavahi-common3 libavahi-client3 libfontconfig1
-  libxrender1 libxcb-render0 libxcb-shm0 libpixman-1-0 libthai0 libharfbuzz0b libxi6
-  libcairo2 libpango-1.0-0 libglib2.0-0t64 libnss3 libnspr4 libcups2t64 libdbus-1-3
-  libdrm2 libx11-6 libxcb1 libxext6 libxkbcommon0
-)
+LIB_PATH=""
+if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+  echo 'playwright_system_deps=installing'
+  sudo -n env PATH="$PATH" npx playwright install-deps chromium
+  echo 'playwright_system_deps=installed'
+else
+  echo 'playwright_system_deps=fallback_user_space'
+  seed_packages=(
+    libatk1.0-0t64 libatk-bridge2.0-0t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1
+    libasound2t64 libatspi2.0-0t64 libavahi-common3 libavahi-client3 libfontconfig1
+    libxrender1 libxcb-render0 libxcb-shm0 libpixman-1-0 libthai0 libharfbuzz0b libxi6
+    libcairo2 libpango-1.0-0 libglib2.0-0t64 libnss3 libnspr4 libcups2t64 libdbus-1-3
+    libdrm2 libx11-6 libxcb1 libxext6 libxkbcommon0
+  )
 
-rm -rf "$DEB_DIR" "$LIB_ROOT"
-mkdir -p "$DEB_DIR" "$LIB_ROOT"
+  rm -rf "$DEB_DIR" "$LIB_ROOT"
+  mkdir -p "$DEB_DIR" "$LIB_ROOT"
 
-mapfile -t package_closure < <(
-  apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "${seed_packages[@]}" 2>/dev/null \
-    | awk '/^[[:alnum:]][[:alnum:]+.-]*(:[[:alnum:]-]+)?$/ { print $1 }' \
-    | sort -u
-)
+  mapfile -t package_closure < <(
+    apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "${seed_packages[@]}" 2>/dev/null \
+      | awk '/^[[:alnum:]][[:alnum:]+.-]*(:[[:alnum:]-]+)?$/ { print $1 }' \
+      | sort -u
+  )
 
-for pkg in "${seed_packages[@]}" "${package_closure[@]}"; do
-  [ -n "$pkg" ] || continue
-  if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
-    continue
-  fi
-  if apt-cache show "$pkg" >/dev/null 2>&1; then
-    (cd "$DEB_DIR" && apt-get download "$pkg" >/dev/null)
-  fi
-done
+  for pkg in "${seed_packages[@]}" "${package_closure[@]}"; do
+    [ -n "$pkg" ] || continue
+    if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
+      continue
+    fi
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+      (cd "$DEB_DIR" && apt-get download "$pkg" >/dev/null)
+    fi
+  done
 
-shopt -s nullglob
-for deb in "$DEB_DIR"/*.deb; do
-  dpkg-deb -x "$deb" "$LIB_ROOT"
-done
-shopt -u nullglob
+  shopt -s nullglob
+  for deb in "$DEB_DIR"/*.deb; do
+    dpkg-deb -x "$deb" "$LIB_ROOT"
+  done
+  shopt -u nullglob
 
-LIB_PATH="$(find "$LIB_ROOT" -type f -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: -)"
+  LIB_PATH="$(find "$LIB_ROOT" -type f -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: -)"
+fi
+
 BROWSER_BIN="$(PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module -e "import { chromium } from 'playwright'; console.log(chromium.executablePath())")"
 
 missing="$(LD_LIBRARY_PATH="$LIB_PATH" ldd "$BROWSER_BIN" 2>/dev/null | awk '/not found/ {print $1}' | sort -u | paste -sd, -)"
@@ -66,10 +75,12 @@ fi
 echo 'browser_missing_libraries=0'
 LD_LIBRARY_PATH="$LIB_PATH" PLAYWRIGHT_BROWSERS_PATH="$BROWSER_ROOT" node --input-type=module <<'NODE'
 import { chromium } from 'playwright';
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ channel: 'chromium', headless: true });
 const page = await browser.newPage();
-await page.setContent('<title>VibeCheck runtime smoke</title>');
+await page.setContent('<!doctype html><meta charset="utf-8"><title>VibeCheck runtime smoke</title><p>VibeCheck 한글 렌더링 ✓</p>');
 if ((await page.title()) !== 'VibeCheck runtime smoke') process.exitCode = 1;
+const shot = await page.screenshot();
+if (shot.length < 100) process.exitCode = 1;
 await browser.close();
 NODE
 
