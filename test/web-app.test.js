@@ -61,7 +61,11 @@ test("web app queues a scan, exposes progress, and serves completed result", asy
 
   const result = await fetch(`${base}/results/${job.id}`);
   assert.equal(result.status, 200);
-  assert.match(await result.text(), /Evidence result/);
+  const resultHtml = await result.text();
+  assert.match(resultHtml, /Evidence result/);
+  assert.match(resultHtml, />새 검사<\/a>/);
+  assert.match(resultHtml, /aria-label="결과 작업"/);
+  assert.match(resultHtml, /color:#f5f7fa/);
 });
 
 test("failed scan page keeps technical errors collapsed behind friendly recovery UX", async (t) => {

@@ -61,6 +61,16 @@ test("customer report HTML escapes target and evidence content", () => {
   assert.match(html, /&lt;script&gt;/);
 });
 
+test("customer report renders a clear Korean zero-finding state without overclaiming", () => {
+  const report = buildCustomerReport({ target: "https://example.com", reviewed: { confirmed: [], provisional: [] } });
+  const html = renderCustomerReportHtml(report);
+  assert.match(html, /검사가 완료됐습니다/);
+  assert.match(html, /확정된 문제를 찾지 못했습니다/);
+  assert.match(html, /모든 문제가 없음을 보장하는 결과는 아닙니다/);
+  assert.match(html, />확정</);
+  assert.match(html, /<h2>확정된 문제<\/h2>/);
+});
+
 test("customer report refuses missing reviewer output", () => {
   assert.throws(() => buildCustomerReport({ target: "https://example.com", reviewed: null }), /reviewed findings are required/);
 });

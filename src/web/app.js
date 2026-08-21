@@ -113,7 +113,8 @@ function pendingPage(job) {
 
 function completedPage(job) {
   if (typeof job.result?.reportHtml === "string") {
-    const toolbar = `<section style="max-width:980px;margin:18px auto;padding:0 32px"><div style="display:flex;gap:10px;flex-wrap:wrap"><a href="/share/${esc(job.shareToken)}">공유 링크</a><a href="/results/${esc(job.id)}/report.html">HTML 저장</a><a href="/api/scans/${esc(job.id)}/report.json">JSON 저장</a></div></section>`;
+    const actionStyle = "display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;border:1px solid #4b566c;border-radius:12px;background:#151922;color:#f5f7fa;text-decoration:none;font:700 14px/1 ui-sans-serif,system-ui,sans-serif";
+    const toolbar = `<section aria-label="결과 작업" style="max-width:980px;margin:18px auto 36px;padding:0 32px"><div style="display:flex;gap:10px;flex-wrap:wrap"><a style="${actionStyle}" href="/">새 검사</a><a style="${actionStyle}" href="/share/${esc(job.shareToken)}">공유 링크</a><a style="${actionStyle}" href="/results/${esc(job.id)}/report.html">HTML 저장</a><a style="${actionStyle}" href="/api/scans/${esc(job.id)}/report.json">JSON 저장</a></div></section>`;
     return job.result.reportHtml.includes("</body>") ? job.result.reportHtml.replace("</body>", `${toolbar}</body>`) : `${job.result.reportHtml}${toolbar}`;
   }
   const summary = job.result?.report?.summary ?? { confirmed: 0, provisional: 0, bySeverity: {} };
