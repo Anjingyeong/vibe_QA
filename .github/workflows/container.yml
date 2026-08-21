@@ -106,80 +106,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Verify OCI host privilege
+      - name: Deploy user-space Playwright runtime on OCI
         shell: bash
         run: |
           set -euo pipefail
           test "$(uname -m)" = "aarch64"
-          sudo -n true
-
-      - name: Install and start Docker when needed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v docker >/dev/null 2>&1; then
-            sudo -n apt-get update
-            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
-          fi
-          sudo -n systemctl enable --now docker
-          sudo -n docker version >/dev/null
-
-      - name: Log in to GHCR on OCI
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '%s' '${{ secrets.GITHUB_TOKEN }}' | sudo -n docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
-
-      - name: Deploy verified ARM64 image
-        shell: bash
-        run: |
-          set -euo pipefail
-          runtime_env="${RUNNER_TEMP}/vibecheck.env"
-          umask 077
-          : > "$runtime_env"
-          printf '%s\n' \
-            'VIBECHECK_RUNS=3' \
-            'VIBECHECK_MAX_PAGES=4' \
-            'VIBECHECK_CONCURRENCY=1' \
-            'VIBECHECK_MAX_JOBS=50' \
-            'VIBECHECK_JOB_TTL_MS=86400000' \
-            'VIBECHECK_RATE_LIMIT=5' \
-            'VIBECHECK_RATE_WINDOW_MS=3600000' >> "$runtime_env"
-          if [ -n "${GROQ_API_KEY:-}" ]; then
-            printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY" >> "$runtime_env"
-            echo 'ai_provider=groq'
-          elif [ -n "${GEMINI_API_KEY:-}" ]; then
-            printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> "$runtime_env"
-            echo 'ai_provider=gemini'
-          else
-            echo 'ai_provider=none'
-          fi
-          trap 'rm -f "$runtime_env"' EXIT
-
-          sudo -n docker pull "${IMAGE}:${GITHUB_SHA}"
-          sudo -n docker volume create vibecheck-data >/dev/null
-          sudo -n docker rm -f vibecheck >/dev/null 2>&1 || true
-          sudo -n docker run -d \
-            --name vibecheck \
-            --restart unless-stopped \
-            --ipc=host \
-            --security-opt "seccomp=${GITHUB_WORKSPACE}/deploy/seccomp_profile.json" \
-            --env-file "$runtime_env" \
-            -p 127.0.0.1:8787:8787 \
-            -v vibecheck-data:/app/artifacts \
-            "${IMAGE}:${GITHUB_SHA}" >/dev/null
-
-      - name: Verify deployed health
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:8787/healthz >/dev/null; then
-              echo 'health=200'
-              sudo -n docker inspect --format 'status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}} user={{.Config.User}}' vibecheck
-              exit 0
-            fi
-            sleep 1
-          done
-          sudo -n docker logs --tail 100 vibecheck
-          exit 1
+          bash deploy/deploy-user-runtime.sh
