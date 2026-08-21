@@ -1,5 +1,7 @@
 export function defaultBrowserChannel(platform = process.platform) {
-  return platform === "win32" ? "msedge" : null;
+  if (platform === "win32") return "msedge";
+  if (platform === "linux") return "chromium";
+  return null;
 }
 
 export function chromiumLaunchOptions({ browserChannel = defaultBrowserChannel(), headless = true } = {}) {
