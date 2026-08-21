@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY src ./src
-COPY README.md ./.env.example ./
+COPY README.md ./
 
 RUN mkdir -p /app/artifacts && chown -R pwuser:pwuser /app/artifacts
 

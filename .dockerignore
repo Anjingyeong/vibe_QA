@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.deploy-tmp
+.chatgpt2codex
+.omo
+node_modules
+artifacts
+evidence
+test
+*.log
+NUL
