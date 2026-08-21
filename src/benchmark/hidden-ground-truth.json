@@ -1,0 +1,19 @@
+{
+  "suite": "blind-launch-suite-v1",
+  "cases": [
+    {
+      "fixture": "broken-v2",
+      "issues": [
+        { "id": "H-001", "severity": "critical", "signature": "secret:html", "title": "Client credential exposure" },
+        { "id": "H-002", "severity": "critical", "signature": "json-sensitive:/api/profile", "title": "Unauthenticated credential field exposure" },
+        { "id": "H-003", "severity": "major", "signature": "link:/account:404", "title": "Broken account navigation" },
+        { "id": "H-004", "severity": "major", "signature": "endpoint:/api/status:503", "title": "Launch-path API server error" },
+        { "id": "H-005", "severity": "major", "signature": "form:/api/register:500", "title": "Invalid registration input crashes server" }
+      ]
+    },
+    {
+      "fixture": "clean-v2",
+      "issues": []
+    }
+  ]
+}

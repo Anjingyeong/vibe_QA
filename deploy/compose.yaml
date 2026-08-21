@@ -1,0 +1,43 @@
+services:
+  vibecheck:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    init: true
+    ipc: host
+    user: pwuser
+    security_opt:
+      - seccomp=./seccomp_profile.json
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      VIBECHECK_JOB_STORE: /app/artifacts/web/jobs.json
+      VIBECHECK_RUNS: ${VIBECHECK_RUNS:-3}
+      VIBECHECK_MAX_PAGES: ${VIBECHECK_MAX_PAGES:-4}
+      VIBECHECK_CONCURRENCY: ${VIBECHECK_CONCURRENCY:-1}
+      VIBECHECK_MAX_JOBS: ${VIBECHECK_MAX_JOBS:-50}
+      VIBECHECK_JOB_TTL_MS: ${VIBECHECK_JOB_TTL_MS:-86400000}
+      VIBECHECK_RATE_LIMIT: ${VIBECHECK_RATE_LIMIT:-5}
+      VIBECHECK_RATE_WINDOW_MS: ${VIBECHECK_RATE_WINDOW_MS:-3600000}
+      VIBECHECK_GROQ_MODELS: ${VIBECHECK_GROQ_MODELS:-openai/gpt-oss-120b,llama-3.3-70b-versatile,qwen/qwen3.6-27b}
+      VIBECHECK_GEMINI_MODEL: ${VIBECHECK_GEMINI_MODEL:-gemini-3.7-flash}
+      VIBECHECK_AI_BASE_URL: ${VIBECHECK_AI_BASE_URL:-}
+      VIBECHECK_AI_API_KEY: ${VIBECHECK_AI_API_KEY:-}
+      VIBECHECK_AI_MODEL: ${VIBECHECK_AI_MODEL:-}
+      VIBECHECK_AI_TIMEOUT_MS: ${VIBECHECK_AI_TIMEOUT_MS:-20000}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - vibecheck-data:/app/artifacts
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  vibecheck-data:

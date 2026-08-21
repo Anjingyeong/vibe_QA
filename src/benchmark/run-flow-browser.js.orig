@@ -1,0 +1,598 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { chromium } from "playwright";
+import { classifyRuntimeEvent } from "../scanner/flow-regressions.js";
+
+export const REQUIRED_FLOW_IDS = [
+  "first-load", "room-create", "room-join", "solo-start", "song-start",
+  "answer-submit", "next-song", "duplicate-song", "refresh", "back",
+  "invalid-input", "missing-route", "missing-api", "mobile-viewport",
+  "runtime-errors", "cleanup",
+];
+
+const PROFILES = {
+  desktop: { viewport: { width: 1280, height: 720 } },
+  mobile: { viewport: { width: 390, height: 844 }, isMobile: true },
+};
+const DEFAULT_TARGET = "https://songsong.jingyeong.cloud";
+const STEP_TIMEOUT = 15_000;
+
+function normalizeTarget(value) {
+  const url = new URL(value);
+  if (!/^https?:$/u.test(url.protocol)) throw new Error("target must use http or https");
+  url.hash = "";
+  url.search = "";
+  return url.href.replace(/\/$/u, "");
+}
+
+export function buildFlowRunPlan({ target = DEFAULT_TARGET, browser = "msedge", runs = 3 } = {}) {
+  const count = Number(runs);
+  if (!Number.isInteger(count) || count < 1) throw new Error("runs must be a positive integer");
+  if (typeof browser !== "string" || !browser.trim()) throw new Error("browser is required");
+  const executions = [];
+  for (let number = 1; number <= count; number += 1) {
+    const runId = `run-${String(number).padStart(2, "0")}`;
+    for (const profile of Object.keys(PROFILES)) {
+      executions.push({
+        runId,
+        browserSessionId: `${runId}-${browser}`,
+        actorContextIds: Object.fromEntries(
+          ["solo", "host", "guest"].map((actor) => [actor, `${runId}-${profile}-${actor}`]),
+        ),
+        profile,
+        viewport: { ...PROFILES[profile].viewport },
+        flowIds: [...REQUIRED_FLOW_IDS],
+      });
+    }
+  }
+  return { target: normalizeTarget(target), browser, runs: count, executions };
+}
+
+function hasCompleteEvidence(finding) {
+  return Boolean(
+    finding && typeof finding.signature === "string" && finding.signature &&
+    Array.isArray(finding.reproduction) && finding.reproduction.length &&
+    typeof finding.expected === "string" && finding.expected &&
+    typeof finding.actual === "string" && finding.actual &&
+    typeof finding.screenshot === "string" && finding.screenshot &&
+    Array.isArray(finding.machineEvidence) && finding.machineEvidence.length &&
+    finding.machineEvidence.every((item) => item && item.type && item.detail),
+  );
+}
+
+export function summarizeFlowRuns(runs) {
+  const missing = [];
+  const incompleteFindings = [];
+  const ids = new Set();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    if (!run?.runId || ids.has(run.runId)) missing.push(`${run?.runId ?? "unknown"}:independent-run`);
+    ids.add(run?.runId);
+    for (const profile of Object.keys(PROFILES)) {
+      const result = run?.profiles?.[profile];
+      const completed = new Set(result?.completedFlowIds ?? []);
+      for (const id of REQUIRED_FLOW_IDS) {
+        if (!completed.has(id)) missing.push(`${run?.runId ?? "unknown"}:${profile}:${id}`);
+      }
+      for (const finding of result?.findings ?? []) {
+        if (!hasCompleteEvidence(finding)) {
+          incompleteFindings.push(`${run?.runId ?? "unknown"}:${profile}:${finding?.signature ?? "unknown"}`);
+        }
+      }
+    }
+  }
+  if (!Array.isArray(runs) || runs.length !== 3) missing.push("three-independent-runs");
+  return {
+    passed: missing.length === 0 && incompleteFindings.length === 0,
+    runCount: Array.isArray(runs) ? runs.length : 0,
+    missing,
+    incompleteFindings,
+  };
+}
+
+function redact(value) {
+  return String(value)
+    .replace(/(bearer\s+)[^\s"']+/giu, "$1[REDACTED]")
+    .replace(/([?&](?:token|auth|key|code|session|cookie)=)[^&#\s]+/giu, "$1[REDACTED]")
+    .replace(/(\/room\/)[A-Z2-9]{6}(?=\b|\/)/gu, "$1[REDACTED]")
+    .replace(/(songsong:room-session:)[A-Z2-9]{6}/gu, "$1[REDACTED]")
+    .replace(/("(?:playerToken|token|cookie|roomCode|code)"\s*:\s*")[^"]+/giu, "$1[REDACTED]");
+}
+
+function safeUrl(value) {
+  try {
+    const url = new URL(value);
+    for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, "[REDACTED]");
+    return redact(url.href);
+  } catch {
+    return redact(value);
+  }
+}
+
+function assertion(detail) {
+  return { type: "assertion", detail: redact(detail) };
+}
+
+function requireState(condition, detail) {
+  if (!condition) throw new Error(detail);
+  return assertion(detail);
+}
+
+function evidenceFor(event) {
+  if (event.type === "response") return { type: "network", detail: `${event.method} ${event.url} -> ${event.status}` };
+  if (event.type === "requestfailed") return { type: "network", detail: `${event.method} ${event.url} failed: ${event.failure}` };
+  return { type: "console", detail: `${event.type}: ${event.message}` };
+}
+
+function captureRuntime(page, events) {
+  page.on("console", (message) => {
+    const location = message.location();
+    events.push({
+      type: "console", level: message.type(), message: redact(message.text()),
+      source: location.url ? safeUrl(location.url) : "",
+    });
+  });
+  page.on("pageerror", (error) => events.push({ type: "pageerror", message: redact(error.message) }));
+  page.on("requestfailed", (request) => events.push({
+    type: "requestfailed", method: request.method(), url: safeUrl(request.url()),
+    failure: redact(request.failure()?.errorText ?? "unknown failure"),
+  }));
+  page.on("response", (response) => events.push({
+    type: "response", method: response.request().method(), url: safeUrl(response.url()), status: response.status(),
+    contentType: response.headers()["content-type"] ?? "",
+  }));
+}
+
+class ConfirmedFlowDefect extends Error {
+  constructor({ classification, severity = "major", title, reproduction, expected, actual, machineEvidence }) {
+    super(actual);
+    this.classification = classification;
+    this.severity = severity;
+    this.title = title;
+    this.reproduction = reproduction;
+    this.expected = expected;
+    this.actual = actual;
+    this.machineEvidence = machineEvidence;
+  }
+}
+
+function confirmedFlowFinding(flowId, profile, defect, screenshot, machineEvidence) {
+  return {
+    signature: `browser:${flowId}:${defect.classification}:${profile}`,
+    severity: defect.severity,
+    title: defect.title,
+    reproduction: defect.reproduction,
+    expected: defect.expected,
+    actual: redact(defect.actual),
+    screenshot,
+    machineEvidence,
+  };
+}
+
+function failedFlow(flowId, profile, error, screenshot, machineEvidence) {
+  return {
+    signature: `flow:${flowId}:${profile}:failed`, severity: "major",
+    title: `${flowId} could not be safely completed on ${profile}`,
+    reproduction: [`Run ${flowId} with the ${profile} browser profile.`],
+    expected: `The ${flowId} flow completes with machine-confirmed evidence.`,
+    actual: redact(error instanceof Error ? error.message : error), screenshot,
+    machineEvidence: machineEvidence.length ? machineEvidence : [assertion("flow did not complete")],
+  };
+}
+
+async function visible(locator, timeout = STEP_TIMEOUT) {
+  await locator.waitFor({ state: "visible", timeout });
+}
+
+async function runProfile({ browser, execution, target, outputDir }) {
+  const options = PROFILES[execution.profile];
+  const directory = path.join(outputDir, execution.runId, execution.profile);
+  await mkdir(directory, { recursive: true });
+  const completedFlowIds = [];
+  const findings = [];
+  const steps = [];
+  const events = [];
+  const actorContexts = {};
+  const actorPages = {};
+  let page;
+  let room = null;
+
+  try {
+    for (const actor of Object.keys(execution.actorContextIds)) {
+      const context = await browser.newContext({ viewport: options.viewport, isMobile: Boolean(options.isMobile) });
+      context.setDefaultTimeout(STEP_TIMEOUT);
+      context.setDefaultNavigationTimeout(30_000);
+      actorContexts[actor] = context;
+      actorPages[actor] = await context.newPage();
+      captureRuntime(actorPages[actor], events);
+    }
+    page = actorPages.host;
+
+    const step = async (flowId, action) => {
+      const eventIndex = events.length;
+      const screenshot = path.join(directory, `${String(steps.length + 1).padStart(2, "0")}-${flowId}.png`);
+      const machineEvidence = [];
+      let error;
+      let defect;
+      try {
+        const result = await action();
+        if (Array.isArray(result)) machineEvidence.push(...result);
+      } catch (caught) {
+        if (caught instanceof ConfirmedFlowDefect) {
+          defect = caught;
+          machineEvidence.push(...caught.machineEvidence);
+        } else {
+          error = caught;
+        }
+      }
+      try {
+        await page.screenshot({ path: screenshot, fullPage: true, timeout: STEP_TIMEOUT });
+      } catch (caught) {
+        error ??= caught;
+      }
+      machineEvidence.push(...events.slice(eventIndex).map(evidenceFor));
+      if (error) {
+        findings.push(failedFlow(flowId, execution.profile, error, screenshot, machineEvidence));
+      } else {
+        completedFlowIds.push(flowId);
+        if (defect) {
+          findings.push(confirmedFlowFinding(flowId, execution.profile, defect, screenshot, machineEvidence));
+        }
+      }
+      steps.push({ flowId, passed: !error && !defect, screenshot, machineEvidence,
+        actual: error || defect ? redact((error ?? defect).message ?? (error ?? defect)) : "completed" });
+    };
+
+    await step("first-load", async () => {
+      const ready = visible(page.locator("main"), 30_000);
+      const response = await page.goto(target, { waitUntil: "domcontentloaded" });
+      await ready;
+      return [requireState(response?.ok(), `document status=${response?.status() ?? "none"}`)];
+    });
+
+    await step("room-create", async () => {
+      const ready = visible(page.locator("#room-name"));
+      await page.getByRole("button", { name: /친구와 하기/u }).click();
+      await ready;
+      await page.locator("#room-name").fill(`VibeCheck-${execution.runId}-${execution.profile}`.slice(0, 16));
+      const responsePromise = page.waitForResponse((response) =>
+        response.request().method() === "POST" && new URL(response.url()).pathname === "/api/rooms");
+      await page.getByRole("button", { name: "방 만들기" }).click();
+      const response = await responsePromise;
+      const payload = await response.json();
+      room = { code: payload.room?.code, playerToken: payload.playerToken };
+      requireState(response.status() === 201, `room create status=${response.status()}`);
+      requireState(room.code && room.playerToken, "room response omitted disposable credentials");
+      await visible(page.getByText(/친구를 기다리는 중/u));
+      return [assertion(`room created status=${response.status()}; identifiers redacted`)];
+    });
+
+    await step("room-join", async () => {
+      if (!room) throw new Error("room creation did not produce a disposable room");
+      const guest = actorPages.guest;
+      await guest.goto(target, { waitUntil: "domcontentloaded" });
+      const setup = visible(guest.locator("#room-name"));
+      await guest.getByRole("button", { name: /친구와 하기/u }).click();
+      await setup;
+      await guest.getByRole("tab", { name: "코드 입력" }).click();
+      await guest.locator("#room-name").fill("VibeCheckGuest");
+      await guest.locator("input").last().fill(room.code);
+      const responsePromise = guest.waitForResponse((response) =>
+        response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/join"));
+      await guest.getByRole("button", { name: /방 입장|입장/u }).click();
+      const response = await responsePromise;
+      requireState(response.ok(), `room join status=${response.status()}`);
+      await visible(guest.getByText(/2명 참가/u));
+      await guest.screenshot({ path: path.join(directory, "03-room-join-guest.png"), fullPage: true });
+      return [assertion(`guest joined status=${response.status()}; identifiers redacted`)];
+    });
+
+    await step("solo-start", async () => {
+      page = actorPages.solo;
+      await page.goto(target, { waitUntil: "domcontentloaded" });
+      const game = visible(page.locator(".game-page"));
+      await page.getByRole("button", { name: /혼자 시작/u }).click();
+      await game;
+      return [assertion("solo game became visible")];
+    });
+
+    await step("song-start", async () => {
+      const play = page.getByRole("button", { name: /음악 재생/u });
+      const changed = page.waitForFunction(() =>
+        !(document.querySelector('[role="status"]')?.textContent ?? "").includes("준비가 끝났습니다"),
+      null, { timeout: STEP_TIMEOUT });
+      await play.click();
+      await changed;
+      return [assertion("playback state changed after the subscribed user action")];
+    });
+
+    await step("answer-submit", async () => {
+      await page.locator("#answer").fill("__vibecheck_invalid_answer__");
+      const feedback = visible(page.locator(".feedback-panel"));
+      await page.getByRole("button", { name: "정답!" }).click();
+      await feedback;
+      return [assertion("answer submission produced feedback")];
+    });
+
+    await step("next-song", async () => {
+      const advanced = page.waitForFunction(() => document.body.innerText.includes("ROUND 02"), null,
+        { timeout: STEP_TIMEOUT });
+      await page.getByRole("button", { name: /바로 다음 곡|바로 결과 보기/u }).click();
+      await advanced;
+      return [assertion("round advanced to ROUND 02")];
+    });
+
+    await step("duplicate-song", async () => {
+      const selector = 'iframe[title*="SongSong"]';
+      const source = await page.locator(selector).getAttribute("src");
+      const changed = page.waitForFunction(({ selector, source }) => {
+        const next = document.querySelector(selector)?.getAttribute("src");
+        return Boolean(next && next !== source);
+      }, { selector, source }, { timeout: STEP_TIMEOUT });
+      await page.getByRole("button", { name: /음원 문제 신고·교체/u }).click();
+      await changed;
+      return [assertion("replacement changed the song source without advancing the round")];
+    });
+
+    await step("refresh", async () => {
+      const rendered = visible(page.locator("main"));
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await rendered;
+      return [assertion("application rendered after refresh")];
+    });
+
+    await step("back", async () => {
+      await page.goto(`${target}/#/terms`, { waitUntil: "domcontentloaded" });
+      await visible(page.getByText("이용약관", { exact: true }).first());
+      const home = visible(page.getByRole("button", { name: /혼자 시작/u }));
+      await page.goBack({ waitUntil: "domcontentloaded" });
+      await home;
+      return [assertion("browser Back returned to home")];
+    });
+
+    await step("invalid-input", async () => {
+      const setup = visible(page.locator("#room-name"));
+      await page.getByRole("button", { name: /친구와 하기/u }).click();
+      await setup;
+      await page.getByRole("tab", { name: "코드 입력" }).click();
+      await page.locator("#room-name").fill("VibeCheckInvalid");
+      await page.locator("input").last().fill("ZZZZZZ");
+      const rejected = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().includes("/join"));
+      await page.getByRole("button", { name: /방 입장|입장/u }).click();
+      const response = await rejected;
+      return [requireState(response.status() >= 400 && response.status() < 500,
+        `invalid input expected 4xx actual=${response.status()}`)];
+    });
+
+    await step("missing-route", async () => {
+      const response = await page.goto(`${target}/__vibecheck_missing__`, { waitUntil: "domcontentloaded" });
+      const observed = {
+        type: "response", url: response?.url() ?? `${target}/__vibecheck_missing__`,
+        status: response?.status(), expectedStatus: 404,
+        contentType: response?.headers()["content-type"] ?? "",
+      };
+      if (observed.status !== 404) {
+        const classification = classifyRuntimeEvent(observed);
+        const actual = `missing route expected status=404 actual=${observed.status ?? "none"}`;
+        throw new ConfirmedFlowDefect({
+          classification: classification.classification === "unknown" ? "unexpected-status" : classification.classification,
+          severity: classification.severity ?? "major",
+          title: "Missing browser route does not return HTTP 404",
+          reproduction: [`Navigate to ${target}/__vibecheck_missing__.`],
+          expected: "The missing browser route returns HTTP 404.",
+          actual,
+          machineEvidence: [assertion(actual)],
+        });
+      }
+      return [assertion("missing route status=404")];
+    });
+
+    await step("missing-api", async () => {
+      await page.goto(target, { waitUntil: "domcontentloaded" });
+      const result = await page.evaluate(async () => {
+        const response = await fetch("/api/__vibecheck_missing__", { headers: { accept: "application/json" } });
+        return { status: response.status, contentType: response.headers.get("content-type") ?? "" };
+      });
+      const observed = {
+        type: "response", url: `${target}/api/__vibecheck_missing__`, status: result.status,
+        expectedStatus: 404, contentType: result.contentType,
+      };
+      if (result.status !== 404) {
+        const classification = classifyRuntimeEvent(observed);
+        const actual = `missing API expected status=404 actual=${result.status} content-type=${result.contentType}`;
+        throw new ConfirmedFlowDefect({
+          classification: classification.classification === "unknown" ? "unexpected-status" : classification.classification,
+          severity: classification.severity ?? "major",
+          title: "Missing API route does not return HTTP 404",
+          reproduction: [`GET ${target}/api/__vibecheck_missing__ with Accept: application/json.`],
+          expected: "The missing API route returns HTTP 404.",
+          actual,
+          machineEvidence: [assertion(actual)],
+        });
+      }
+      return [assertion("missing API status=404")];
+    });
+
+    await step("mobile-viewport", async () => {
+      const size = await page.evaluate(() => ({
+        width: innerWidth, height: innerHeight,
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }));
+      requireState(size.width === options.viewport.width,
+        `viewport width expected=${options.viewport.width} actual=${size.width}`);
+      requireState(size.height === options.viewport.height,
+        `viewport height expected=${options.viewport.height} actual=${size.height}`);
+      requireState(size.scrollWidth <= size.clientWidth + 1,
+        `horizontal overflow scrollWidth=${size.scrollWidth} clientWidth=${size.clientWidth}`);
+      return [assertion(`viewport=${size.width}x${size.height}; no horizontal overflow`)];
+    });
+
+    await step("runtime-errors", async () => {
+      const errors = events.filter((event) =>
+        event.type === "pageerror" || event.type === "requestfailed" ||
+        (event.type === "console" && event.level === "error") ||
+        (event.type === "response" && event.status >= 400));
+      const classified = errors.map((event) => {
+        let candidate = event;
+        if (event.type === "response" && event.url.includes("__vibecheck_missing__")) {
+          candidate = { ...event, expectedStatus: 404 };
+        } else if (event.type === "response" && event.url.includes("/join") && event.status < 500) {
+          candidate = { ...event, expectedStatus: event.status };
+        }
+        return { event, classification: classifyRuntimeEvent(candidate) };
+      });
+      const hasExpectedNegativeResponse = classified.some(({ event, classification }) =>
+        event.type === "response" && classification.classification === "expected-negative");
+      const unexpected = classified.filter(({ event, classification }) => {
+        if (classification.classification !== "unknown") return classification.confirmable;
+        if (event.type === "console" && /^Failed to load resource:/iu.test(event.message) &&
+            hasExpectedNegativeResponse) return false;
+        if (event.type === "requestfailed" && event.failure === "csp" &&
+            event.url.includes("static.cloudflareinsights.com")) return false;
+        return true;
+      });
+      if (unexpected.length) {
+        const kinds = [...new Set(unexpected.map(({ classification }) =>
+          classification.classification === "unknown" ? "runtime-error" : classification.classification))];
+        const actual = `${unexpected.length} confirmed runtime error(s) captured: ${kinds.join(", ")}`;
+        throw new ConfirmedFlowDefect({
+          classification: kinds.join("+") || "runtime-error",
+          severity: "major",
+          title: "Runtime errors occurred during the flow benchmark",
+          reproduction: [`Run the required flows with the ${execution.profile} browser profile.`],
+          expected: "Required flows complete without confirmable application runtime errors.",
+          actual,
+          machineEvidence: unexpected.map(({ event }) => evidenceFor(event)),
+        });
+      }
+      return [assertion(`runtime events=${events.length}; unexpected errors=0`)];
+    });
+
+    await step("cleanup", async () => {
+      const cleanupPage = actorPages.host;
+      if (room) {
+        const deleted = cleanupPage.waitForResponse((response) =>
+          response.request().method() === "DELETE" && /\/api\/rooms\/[A-Z2-9]{6}$/u.test(new URL(response.url()).pathname));
+        const status = await cleanupPage.evaluate(async ({ code, playerToken }) => {
+          const response = await fetch(`/api/rooms/${code}`, {
+            method: "DELETE",
+            headers: { authorization: `Bearer ${playerToken}`, "content-type": "application/json" },
+          });
+          return response.status;
+        }, room);
+        await deleted;
+        requireState(status >= 200 && status < 300, `room cleanup status=${status}`);
+        room = null;
+      }
+      await cleanupPage.evaluate(() => {
+        for (const key of Object.keys(sessionStorage)) {
+          if (key.startsWith("songsong:room-session:")) sessionStorage.removeItem(key);
+        }
+      });
+      return [assertion("disposable room deleted and room session storage cleared")];
+    });
+  } finally {
+    const cleanupPage = actorPages.host;
+    if (room && cleanupPage && !cleanupPage.isClosed()) {
+      try {
+        await cleanupPage.evaluate(async ({ code, playerToken }) => {
+          await fetch(`/api/rooms/${code}`, {
+            method: "DELETE", keepalive: true,
+            headers: { authorization: `Bearer ${playerToken}`, "content-type": "application/json" },
+          });
+        }, room);
+      } catch {
+        // The cleanup flow records the primary failure; context closure remains unconditional.
+      }
+    }
+    const closures = await Promise.allSettled(Object.values(actorContexts).map((context) => context.close()));
+    const rejected = closures.find((result) => result.status === "rejected");
+    if (rejected) throw rejected.reason;
+  }
+
+  const result = { profile: execution.profile, viewport: options.viewport,
+    completedFlowIds, findings, steps, runtimeEvents: events };
+  await writeFile(path.join(directory, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  return result;
+}
+
+export async function runFlowBrowserBenchmark({
+  target = DEFAULT_TARGET, browser = "msedge", runs = 3,
+  output = path.resolve("artifacts", "flow-browser"),
+} = {}) {
+  const plan = buildFlowRunPlan({ target, browser, runs });
+  const outputDir = path.resolve(output);
+  await mkdir(outputDir, { recursive: true });
+  const results = [];
+  for (let number = 1; number <= plan.runs; number += 1) {
+    const runId = `run-${String(number).padStart(2, "0")}`;
+    const run = { runId, profiles: {} };
+    let instance;
+    try {
+      instance = await chromium.launch({ channel: plan.browser, headless: true });
+      for (const profile of Object.keys(PROFILES)) {
+        const execution = plan.executions.find((item) => item.runId === runId && item.profile === profile);
+        run.profiles[profile] = await runProfile({ browser: instance, execution, target: plan.target, outputDir });
+      }
+    } finally {
+      try {
+        if (instance && instance.contexts().length !== 0) {
+          throw new Error(`${instance.contexts().length} BrowserContext leak(s) before browser close`);
+        }
+      } finally {
+        await instance?.close();
+      }
+    }
+    results.push(run);
+    await writeFile(path.join(outputDir, runId, "result.json"), `${JSON.stringify(run, null, 2)}\n`, "utf8");
+  }
+  const aggregate = {
+    generatedAt: new Date().toISOString(), target: plan.target, browser: plan.browser,
+    requestedRuns: plan.runs, ...summarizeFlowRuns(results), runs: results,
+  };
+  await writeFile(path.join(outputDir, "aggregate.json"), `${JSON.stringify(aggregate, null, 2)}\n`, "utf8");
+  return aggregate;
+}
+
+function usage() {
+  return `Usage: node src/benchmark/run-flow-browser.js [options]\n\nOptions:\n  --target <url>      Target web application (default: ${DEFAULT_TARGET})\n  --browser <channel> Playwright Chromium channel (default: msedge)\n  --runs <count>      Independent browser sessions (default: 3)\n  --output <dir>      Artifact directory (default: artifacts/flow-browser)\n  --help              Show this usage text`;
+}
+
+function parseArgs(args) {
+  const options = {};
+  const allowed = new Set(["target", "browser", "runs", "output"]);
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--help") return { help: true };
+    if (!argument.startsWith("--") || !allowed.has(argument.slice(2))) {
+      throw new Error(`Unknown option: ${argument}`);
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`Missing value for ${argument}`);
+    const name = argument.slice(2);
+    options[name] = name === "runs" ? Number(value) : value;
+    index += 1;
+  }
+  return options;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      console.log(usage());
+    } else {
+      const result = await runFlowBrowserBenchmark(options);
+      console.log(`# Flow browser benchmark: ${result.passed ? "PASS" : "FAIL"}`);
+      console.log(`runs=${result.runCount} missing=${result.missing.length} incompleteEvidence=${result.incompleteFindings.length}`);
+      console.log(`aggregate=${path.resolve(options.output ?? path.join("artifacts", "flow-browser"), "aggregate.json")}`);
+      process.exitCode = result.passed ? 0 : 1;
+    }
+  } catch (error) {
+    console.error(redact(error instanceof Error ? error.message : error));
+    console.error(usage());
+    process.exitCode = 1;
+  }
+}

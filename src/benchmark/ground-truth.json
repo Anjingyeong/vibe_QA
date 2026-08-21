@@ -1,0 +1,71 @@
+{
+  "fixture": "seeded-launch-app-v1",
+  "issues": [
+    {
+      "id": "VC-001",
+      "severity": "critical",
+      "signature": "secret:html",
+      "title": "Secret-like credential exposed in client HTML"
+    },
+    {
+      "id": "VC-002",
+      "severity": "critical",
+      "signature": "json-sensitive:/api/users",
+      "title": "Unauthenticated API leaks sensitive credential field"
+    },
+    {
+      "id": "VC-003",
+      "severity": "major",
+      "signature": "link:/dashboard:404",
+      "title": "Primary internal link is broken"
+    },
+    {
+      "id": "VC-004",
+      "severity": "major",
+      "signature": "endpoint:/api/health:500",
+      "title": "Linked API endpoint returns server error"
+    },
+    {
+      "id": "VC-005",
+      "severity": "major",
+      "signature": "meta:viewport-missing",
+      "title": "Mobile viewport metadata is missing"
+    },
+    {
+      "id": "VC-006",
+      "severity": "major",
+      "signature": "form:/api/login:500",
+      "title": "Invalid login input causes server error"
+    },
+    {
+      "id": "VC-007",
+      "severity": "major",
+      "signature": "resource:http-mixed-content",
+      "title": "Insecure HTTP subresource is referenced"
+    },
+    {
+      "id": "VC-008",
+      "severity": "minor",
+      "signature": "dom:duplicate-id",
+      "title": "Duplicate DOM id"
+    },
+    {
+      "id": "VC-009",
+      "severity": "minor",
+      "signature": "a11y:image-alt-missing",
+      "title": "Image is missing alt text"
+    },
+    {
+      "id": "VC-010",
+      "severity": "minor",
+      "signature": "html:lang-missing",
+      "title": "Document language is not declared"
+    },
+    {
+      "id": "VC-011",
+      "severity": "major",
+      "signature": "headers:baseline-missing",
+      "title": "Baseline browser security headers are missing"
+    }
+  ]
+}

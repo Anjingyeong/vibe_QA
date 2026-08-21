@@ -1,0 +1,21 @@
+{
+  "fixtureReference": "test/fixtures/flow-ground-truth.json",
+  "issues": [
+    {
+      "signature": "flow:missing-route:desktop:failed",
+      "severity": "major"
+    },
+    {
+      "signature": "flow:missing-route:mobile:failed",
+      "severity": "major"
+    },
+    {
+      "signature": "flow:missing-api:desktop:failed",
+      "severity": "major"
+    },
+    {
+      "signature": "flow:missing-api:mobile:failed",
+      "severity": "major"
+    }
+  ]
+}

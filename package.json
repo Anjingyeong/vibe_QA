@@ -1,0 +1,24 @@
+{
+  "name": "vibecheck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Evidence-first QA benchmark and launch-check engine for AI/vibe-coded web apps.",
+  "scripts": {
+    "test": "node --test",
+    "benchmark": "node src/benchmark/run.js",
+    "benchmark:hidden": "node src/benchmark/run-hidden.js",
+    "benchmark:browser": "node src/benchmark/run-browser.js",
+    "benchmark:flow": "node src/benchmark/run-flow-browser.js",
+    "benchmark:flow:trust": "node src/benchmark/run-flow-trust.js",
+    "benchmark:trust": "node src/benchmark/run-trust.js",
+    "fixture": "node src/fixture/server.js",
+    "web": "node src/web/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

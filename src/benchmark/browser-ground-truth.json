@@ -1,0 +1,21 @@
+{
+  "suite": "browser-evidence-suite-v1",
+  "cases": [
+    {
+      "fixture": "broken-browser-v1",
+      "issues": [
+        { "id": "B-001", "severity": "major", "signature": "browser:console-error:desktop", "title": "Desktop console error" },
+        { "id": "B-002", "severity": "major", "signature": "browser:console-error:mobile", "title": "Mobile console error" },
+        { "id": "B-003", "severity": "major", "signature": "browser:page-error:desktop", "title": "Desktop uncaught runtime error" },
+        { "id": "B-004", "severity": "major", "signature": "browser:page-error:mobile", "title": "Mobile uncaught runtime error" },
+        { "id": "B-005", "severity": "minor", "signature": "browser:http:/missing.png:404:desktop", "title": "Desktop broken image resource" },
+        { "id": "B-006", "severity": "minor", "signature": "browser:http:/missing.png:404:mobile", "title": "Mobile broken image resource" },
+        { "id": "B-007", "severity": "major", "signature": "browser:horizontal-overflow:mobile", "title": "Mobile horizontal overflow" }
+      ]
+    },
+    {
+      "fixture": "clean-browser-v1",
+      "issues": []
+    }
+  ]
+}
