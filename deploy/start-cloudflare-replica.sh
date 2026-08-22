@@ -8,6 +8,14 @@ RUNTIME_ROOT="${VIBECHECK_RUNTIME_ROOT:-$HOME/.local/share/vibecheck}"
 PID_FILE="$RUNTIME_ROOT/cloudflared-vibecheck.pid"
 LOG_FILE="$RUNTIME_ROOT/cloudflared-vibecheck.log"
 
+# A healthy public endpoint means an existing tunnel/replica is already
+# serving this origin. Avoid bouncing it on every application deployment.
+if curl -fsS --connect-timeout 3 --max-time 5 "https://${HOSTNAME}/healthz" >/dev/null 2>&1; then
+  echo "cloudflared_replica=already_healthy"
+  echo "public_health=200"
+  exit 0
+fi
+
 [ -r "$CONFIG" ] || { echo "cloudflare_config_readable=no"; exit 1; }
 [ -x "$CLOUDFLARED" ] || { echo "cloudflared_binary=missing"; exit 1; }
 "$CLOUDFLARED" --config "$CONFIG" tunnel ingress validate >/dev/null

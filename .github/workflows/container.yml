@@ -14,6 +14,8 @@ permissions:
 
 concurrency:
   group: vibecheck-container-${{ github.ref }}
+  # Never interrupt a production deploy after it has started.
+  # The deploy briefly replaces the old runtime, so cancellation can leave the origin down.
   cancel-in-progress: false
 
 env:
@@ -116,6 +118,12 @@ jobs:
           test "$(uname -m)" = "aarch64"
           bash deploy/deploy-user-runtime.sh
 
+      - name: Ensure Cloudflare public route
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/start-cloudflare-replica.sh
+
   verify-oci-runtime:
     needs: deploy-oci
     runs-on: [self-hosted, Linux, ARM64, oci]
@@ -126,3 +134,17 @@ jobs:
           set -euo pipefail
           curl -fsS http://127.0.0.1:8787/healthz >/dev/null
           echo "oci_runtime_health=200"
+
+      - name: Verify public hostname survives runner cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            if curl -fsS --connect-timeout 5 --max-time 10 https://vibecheck.jingyeong.cloud/healthz >/dev/null; then
+              echo "public_health=200"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "public_health=failed"
+          exit 1
